@@ -1,12 +1,11 @@
 import { INGREDIENTS, CONFLICTS, findIngredient } from "../data/ingredients";
 
 // NOTE ON SECURITY:
-// API key sekarang langsung ditempel di sini. Cocok untuk demo lokal,
-// tapi jangan di-deploy public ya agar tidak dicuri orang lain.
-
-const MODEL = "gemini-3.1-flash-lite"; 
-const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
-const API_KEY = "AQ.Ab8RN6J0i07SsTS6t-J96ZhDvdE2doEAhT0JdEb268PiIxUNhQ";
+// Panggilan ke Gemini sekarang lewat backend serverless function di
+// /api/chat.js, jadi API key TIDAK ikut tertanam di kode yang dikirim ke
+// browser pengguna. Key-nya disimpan sebagai env var di server (lihat
+// api/chat.js untuk detail).
+const API_URL = "/api/chat";
 
 function buildSystemPrompt() {
   const ingredientSummary = INGREDIENTS.map(
@@ -39,8 +38,10 @@ Aturan penting:
 
 const SYSTEM_PROMPT = buildSystemPrompt();
 
+// Sekarang tidak perlu cek API key di frontend sama sekali — key-nya
+// hidup di server, bukan di browser.
 export function hasApiKey() {
-  return Boolean(API_KEY);
+  return true;
 }
 
 /**
@@ -48,17 +49,13 @@ export function hasApiKey() {
  * @returns {Promise<string>}
  */
 export async function askAssistant(messages) {
-  // Langsung menggunakan variable API_KEY yang di-hardcode di atas
-  if (!API_KEY) {
-    throw new Error("API key belum diatur.");
-  }
-
+  // Gemini tidak punya role "assistant", harus "model".
   const contents = messages.map((m) => ({
     role: m.role === "assistant" ? "model" : "user",
     parts: [{ text: m.content }],
   }));
 
-  const response = await fetch(`${API_URL}?key=${API_KEY}`, {
+  const response = await fetch(API_URL, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -68,25 +65,22 @@ export async function askAssistant(messages) {
         parts: [{ text: SYSTEM_PROMPT }],
       },
       contents,
-      generationConfig: {
-        maxOutputTokens: 400,
-      },
     }),
   });
 
+  const data = await response.json().catch(() => null);
+
   if (!response.ok) {
-    const errBody = await response.json().catch(() => null);
-    const detail = errBody?.error?.message;
-    if (response.status === 400 && detail?.toLowerCase().includes("api key")) {
-      throw new Error("API key tidak valid. Cek kembali kode Anda.");
-    }
-    if (response.status === 403) {
-      throw new Error("API key tidak valid atau tidak punya akses.");
-    }
+    const detail = data?.error;
     if (response.status === 429) {
       throw new Error("Terlalu banyak permintaan sekaligus, coba beberapa saat lagi.");
     }
     throw new Error(detail || "Gagal menghubungi asisten AI. Coba lagi.");
+  }
+
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  return text?.trim() || "Maaf, aku belum bisa jawab itu sekarang.";
+}    throw new Error(detail || "Gagal menghubungi asisten AI. Coba lagi.");
   }
 
   const data = await response.json();
